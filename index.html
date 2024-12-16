@@ -25,6 +25,15 @@
             height: auto;
             max-height: 50vh;
             border: 2px solid #333;
+            position: absolute;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none; /* Para não interferir na interação com o vídeo */
+            width: 100%;
+            height: 100%;
         }
         #timer {
             font-size: 1.5rem;
@@ -77,6 +86,7 @@
 </head>
 <body>
     <video id="camera" autoplay muted></video>
+    <canvas id="canvas"></canvas>
     <div id="timer">Cronômetro: 0.00s</div>
     <div id="buttons">
         <button id="download">Download CSV</button>
@@ -96,10 +106,12 @@
 
     <script>
         const video = document.getElementById('camera');
+        const canvas = document.getElementById('canvas');
         const timerDisplay = document.getElementById('timer');
         const tableBody = document.getElementById('time-log').querySelector('tbody');
         const downloadButton = document.getElementById('download');
         const clearButton = document.getElementById('clear');
+        const ctx = canvas.getContext('2d');
         let stream = null;
         let startTime = null;
         let interval = null;
@@ -124,28 +136,49 @@
             detectPerson();
         }
 
- let lastDetectionTime = null; // Tempo da última detecção
+        let lastDetectionTime = null; // Tempo da última detecção
 
-function detectPerson() {
-    if (!model) return;
+        function detectPerson() {
+            if (!model) return;
 
-    model.detect(video).then(predictions => {
-        const currentPersonCount = predictions.filter(prediction => 
-            prediction.class === "person" && prediction.score > 0.6
-        ).length;
+            model.detect(video).then(predictions => {
+                // Limpar o canvas antes de desenhar novamente
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        const now = Date.now();
-        if (currentPersonCount > 0) {
-            if (!lastDetectionTime || (now - lastDetectionTime) >= 60000) {
-                // Nova detecção permitida após 1 minuto
-                toggleTimer();
-                lastDetectionTime = now;
-            }
+                predictions.forEach(prediction => {
+                    if (prediction.class === "person" && prediction.score > 0.1) {
+                        // Desenha a caixa ao redor da pessoa detectada
+                        ctx.beginPath();
+                        ctx.rect(prediction.bbox[0], prediction.bbox[1], prediction.bbox[2], prediction.bbox[3]);
+                        ctx.lineWidth = 4;
+                        ctx.strokeStyle = 'red'; // Cor da caixa
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                        ctx.fill();
+                        ctx.stroke();
+
+                        // Exibe o nome da classe e a confiança no centro da caixa
+                        ctx.fillStyle = "white";
+                        ctx.font = "16px Arial";
+                        ctx.fillText(`Pessoa: ${Math.round(prediction.score * 100)}%`, prediction.bbox[0] + 5, prediction.bbox[1] + 20);
+                    }
+                });
+
+                const currentPersonCount = predictions.filter(prediction => 
+                    prediction.class === "person" && prediction.score > 0.1
+                ).length;
+
+                const now = Date.now();
+                if (currentPersonCount > 0) {
+                    if (!lastDetectionTime || (now - lastDetectionTime) >= 60000) {
+                        // Nova detecção permitida após 1 minuto
+                        toggleTimer();
+                        lastDetectionTime = now;
+                    }
+                }
+
+                requestAnimationFrame(detectPerson);
+            });
         }
-
-        requestAnimationFrame(detectPerson);
-    });
-}
 
         function toggleTimer() {
             if (!startTime) {
@@ -179,35 +212,32 @@ function detectPerson() {
             tableBody.appendChild(row);
         }
 
-function downloadCSV() {
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Número,Tempo Decorrido (s),Data e Hora\n";  // Cabeçalho da tabela
+        function downloadCSV() {
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Número,Tempo Decorrido (s),Data e Hora\n";  // Cabeçalho da tabela
 
-    // Itera sobre os registros da tabela e cria o conteúdo do CSV
-    const rows = tableBody.querySelectorAll('tr');
-    if (rows.length === 0) {
-        alert("Nenhum dado disponível para exportar.");
-        return; // Sai da função caso não haja dados
-    }
+            // Itera sobre os registros da tabela e cria o conteúdo do CSV
+            const rows = tableBody.querySelectorAll('tr');
+            if (rows.length === 0) {
+                alert("Nenhum dado disponível para exportar.");
+                return; // Sai da função caso não haja dados
+            }
 
-    rows.forEach((row, index) => {
-        const cells = row.querySelectorAll('td');
-        const rowData = Array.from(cells).map(cell => `"${cell.textContent.replace(/"/g, '""')}"`).join(",");
-        csvContent += rowData + "\n";
-    });
+            rows.forEach((row, index) => {
+                const cells = row.querySelectorAll('td');
+                const rowData = Array.from(cells).map(cell => `"${cell.textContent.replace(/"/g, '""')}"`).join(",");
+                csvContent += rowData + "\n";
+            });
 
-    // Criação do link para download do CSV
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'log_pessoas.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
-
-
+            // Criação do link para download do CSV
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement('a');
+            link.setAttribute('href', encodedUri);
+            link.setAttribute('download', 'log_pessoas.csv');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
 
         function clearTable() {
             tableBody.innerHTML = '';
