@@ -25,15 +25,6 @@
             height: auto;
             max-height: 50vh;
             border: 2px solid #333;
-            position: absolute;
-        }
-        canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            pointer-events: none; /* Para não interferir na interação com o vídeo */
-            width: 100%;
-            height: 100%;
         }
         #timer {
             font-size: 1.5rem;
@@ -82,6 +73,11 @@
         button:hover {
             background-color: #444;
         }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
     </style>
 </head>
 <body>
@@ -105,153 +101,187 @@
     </table>
 
     <script>
-        const video = document.getElementById('camera');
-        const canvas = document.getElementById('canvas');
-        const timerDisplay = document.getElementById('timer');
-        const tableBody = document.getElementById('time-log').querySelector('tbody');
-        const downloadButton = document.getElementById('download');
-        const clearButton = document.getElementById('clear');
-        const ctx = canvas.getContext('2d');
-        let stream = null;
-        let startTime = null;
-        let interval = null;
-        let logCounter = 0;
-        let model = null;
-        let personDetected = 0; // Contador de pessoas detectadas
+const video = document.getElementById('camera');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const timerDisplay = document.getElementById('timer');
+const tableBody = document.getElementById('time-log').querySelector('tbody');
+const downloadButton = document.getElementById('download');
+const clearButton = document.getElementById('clear');
+let stream = null;
+let startTime = null;
+let interval = null;
+let logCounter = 0;
+let model = null;
+let personDetected = 0; // Contador de pessoas detectadas
 
-        async function startCamera() {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment" },
-                });
-                video.srcObject = stream;
-            } catch (error) {
-                alert("Erro ao acessar a câmera: " + error.message);
-            }
-        }
+// Função para salvar a tabela no localStorage
+function saveTableData() {
+    const rows = [];
+    const tableRows = tableBody.querySelectorAll('tr');
+    tableRows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        rows.push({
+            number: cells[0].textContent,
+            time: cells[1].textContent,
+            datetime: cells[2].textContent
+        });
+    });
+    localStorage.setItem('timeLogData', JSON.stringify(rows));
+}
 
-        async function loadModel() {
-            model = await cocoSsd.load();
-            console.log("Modelo carregado com sucesso!");
-            detectPerson();
-        }
-
-        let lastDetectionTime = null; // Tempo da última detecção
-
-        function detectPerson() {
-            if (!model) return;
-
-            model.detect(video).then(predictions => {
-                // Limpar o canvas antes de desenhar novamente
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                predictions.forEach(prediction => {
-                    if (prediction.class === "person" && prediction.score > 0.1) {
-                        // Desenha a caixa ao redor da pessoa detectada
-                        ctx.beginPath();
-                        ctx.rect(prediction.bbox[0], prediction.bbox[1], prediction.bbox[2], prediction.bbox[3]);
-                        ctx.lineWidth = 4;
-                        ctx.strokeStyle = 'red'; // Cor da caixa
-                        ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
-                        ctx.fill();
-                        ctx.stroke();
-
-                        // Exibe o nome da classe e a confiança no centro da caixa
-                        ctx.fillStyle = "white";
-                        ctx.font = "16px Arial";
-                        ctx.fillText(`Pessoa: ${Math.round(prediction.score * 100)}%`, prediction.bbox[0] + 5, prediction.bbox[1] + 20);
-                    }
-                });
-
-                const currentPersonCount = predictions.filter(prediction => 
-                    prediction.class === "person" && prediction.score > 0.1
-                ).length;
-
-                const now = Date.now();
-                if (currentPersonCount > 0) {
-                    if (!lastDetectionTime || (now - lastDetectionTime) >= 60000) {
-                        // Nova detecção permitida após 1 minuto
-                        toggleTimer();
-                        lastDetectionTime = now;
-                    }
-                }
-
-                requestAnimationFrame(detectPerson);
-            });
-        }
-
-        function toggleTimer() {
-            if (!startTime) {
-                // Inicia o cronômetro
-                startTime = Date.now();
-                interval = setInterval(() => {
-                    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(0);
-                    timerDisplay.textContent = `Cronômetro: ${elapsedTime}s`;
-                }, 100);
-            } else {
-                // Para o cronômetro e salva na tabela
-                clearInterval(interval);
-                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(0);
-                addLog(elapsedTime);
-                startTime = null;
-                timerDisplay.textContent = "Cronômetro: 0.00s";
-            }
-        }
-
-        function addLog(elapsedTime) {
+// Função para carregar a tabela do localStorage
+function loadTableData() {
+    const savedData = localStorage.getItem('timeLogData');
+    if (savedData) {
+        const rows = JSON.parse(savedData);
+        rows.forEach(row => {
             logCounter++;
-            const now = new Date();
-            const formattedDate = now.toLocaleDateString();
-            const formattedTime = now.toLocaleTimeString();
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${logCounter}</td>
-                <td>${elapsedTime}</td>
-                <td>${formattedDate} ${formattedTime}</td>
+            const newRow = document.createElement('tr');
+            newRow.innerHTML = `
+                <td>${row.number}</td>
+                <td>${row.time}</td>
+                <td>${row.datetime}</td>
             `;
-            tableBody.appendChild(row);
-        }
+            tableBody.appendChild(newRow);
+        });
+    }
+}
 
-        function downloadCSV() {
-            let csvContent = "data:text/csv;charset=utf-8,";
-            csvContent += "Número,Tempo Decorrido (s),Data e Hora\n";  // Cabeçalho da tabela
+async function startCamera() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+        video.srcObject = stream;
+        video.play();
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+    } catch (error) {
+        alert("Erro ao acessar a câmera: " + error.message);
+    }
+}
 
-            // Itera sobre os registros da tabela e cria o conteúdo do CSV
-            const rows = tableBody.querySelectorAll('tr');
-            if (rows.length === 0) {
-                alert("Nenhum dado disponível para exportar.");
-                return; // Sai da função caso não haja dados
+async function loadModel() {
+    model = await cocoSsd.load();
+    console.log("Modelo carregado com sucesso!");
+    detectPerson();
+}
+
+let lastDetectionTime = null; // Tempo da última detecção
+
+function detectPerson() {
+    if (!model) return;
+
+    model.detect(video).then(predictions => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height); // Limpa o canvas
+
+        predictions.forEach(prediction => {
+            if (prediction.class === "person" && prediction.score > 0.1) {
+                // Desenha a caixa delimitadora
+                ctx.beginPath();
+                ctx.rect(prediction.bbox[0], prediction.bbox[1], prediction.bbox[2], prediction.bbox[3]);
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = 'red';
+                ctx.fillStyle = 'red';
+                ctx.stroke();
+                ctx.fillText(prediction.class, prediction.bbox[0], prediction.bbox[1] > 10 ? prediction.bbox[1] - 5 : 10);
             }
-
-            rows.forEach((row, index) => {
-                const cells = row.querySelectorAll('td');
-                const rowData = Array.from(cells).map(cell => `"${cell.textContent.replace(/"/g, '""')}"`).join(",");
-                csvContent += rowData + "\n";
-            });
-
-            // Criação do link para download do CSV
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement('a');
-            link.setAttribute('href', encodedUri);
-            link.setAttribute('download', 'log_pessoas.csv');
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        function clearTable() {
-            tableBody.innerHTML = '';
-            logCounter = 0;
-        }
-
-        downloadButton.addEventListener('click', downloadCSV);
-        clearButton.addEventListener('click', clearTable);
-
-        video.addEventListener('loadeddata', () => {
-            loadModel();
         });
 
-        startCamera();
+        const currentPersonCount = predictions.filter(prediction => 
+            prediction.class === "person" && prediction.score > 0.01
+        ).length;
+
+        const now = Date.now();
+        if (currentPersonCount > 0) {
+            if (!lastDetectionTime || (now - lastDetectionTime) >= 60000) {
+                // Nova detecção permitida após 1 minuto
+                toggleTimer();
+                lastDetectionTime = now;
+            }
+        }
+
+        requestAnimationFrame(detectPerson);
+    });
+}
+
+function toggleTimer() {
+    if (!startTime) {
+        // Inicia o cronômetro
+        startTime = Date.now();
+        interval = setInterval(() => {
+            const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(0);
+            timerDisplay.textContent = `Cronômetro: ${elapsedTime}s`;
+        }, 100);
+    } else {
+        // Para o cronômetro e salva na tabela
+        clearInterval(interval);
+        const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(0);
+        addLog(elapsedTime);
+        startTime = null;
+        timerDisplay.textContent = "Cronômetro: 0.00s";
+    }
+}
+
+function addLog(elapsedTime) {
+    logCounter++;
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString();
+    const formattedTime = now.toLocaleTimeString();
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td>${logCounter}</td>
+        <td>${elapsedTime}</td>
+        <td>${formattedDate} ${formattedTime}</td>
+    `;
+    tableBody.appendChild(row);
+    saveTableData(); // Salva os dados no localStorage
+}
+
+function downloadCSV() {
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Número,Tempo Decorrido (s),Data e Hora\n";  // Cabeçalho da tabela
+
+    // Itera sobre os registros da tabela e cria o conteúdo do CSV
+    const rows = tableBody.querySelectorAll('tr');
+    if (rows.length === 0) {
+        alert("Nenhum dado disponível para exportar.");
+        return; // Sai da função caso não haja dados
+    }
+
+    rows.forEach((row, index) => {
+        const cells = row.querySelectorAll('td');
+        const rowData = Array.from(cells).map(cell => `"${cell.textContent.replace(/"/g, '""')}"`).join(",");
+        csvContent += rowData + "\n";
+    });
+
+    // Criação do link para download do CSV
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'log_pessoas.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function clearTable() {
+    tableBody.innerHTML = '';
+    logCounter = 0;
+    localStorage.removeItem('timeLogData'); // Remove os dados do localStorage
+}
+
+downloadButton.addEventListener('click', downloadCSV);
+clearButton.addEventListener('click', clearTable);
+
+video.addEventListener('loadeddata', () => {
+    loadModel();
+});
+
+startCamera();
+loadTableData(); // Carrega os dados da tabela do localStorage ao carregar a página
+
     </script>
 </body>
 </html>
